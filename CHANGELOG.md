@@ -44,6 +44,7 @@ and this project adheres to
 
 ### Changed
 
+- 🔧(docker) Replace MinIO with RustFS for development and CI storage
 - 💄(frontend) Hide the unavailable thread follow control
 - ✨(frontend) Expand the message composer up to eight lines
 - ⚡(frontend) Speed up the emoji picker and align reaction artwork

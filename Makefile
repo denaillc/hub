@@ -73,8 +73,8 @@ FRONT_DEV_YARN      = $(COMPOSE) run --rm --service-ports -w //app/src/frontend/
 
 default: help
 
-data/media:
-	@mkdir -p data/media
+data/rustfs:
+	@mkdir -p data/rustfs
 
 data/static:
 	@mkdir -p data/static
@@ -104,7 +104,7 @@ create-env-local-files:
 .PHONY: create-env-local-files
 
 pre-bootstrap: \
-	data/media \
+	data/rustfs \
 	data/static \
 	data/postgresql.local \
 	create-env-local-files
@@ -229,6 +229,7 @@ logs: ## display app-dev logs (follow mode)
 .PHONY: logs
 
 run-backend: ## Start only the backend application and all needed services
+run-backend: data/rustfs
 	@$(MAKE) stop
 	@$(COMPOSE) up --force-recreate -d nginx
 .PHONY: run-backend
