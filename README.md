@@ -120,7 +120,38 @@ When running the project, the following services are available:
 | **Mailcatcher** | [http://localhost:9804](http://localhost:9804)          | Email testing interface  | No auth required              |
 | **PostgreSQL**  | 9812                                                    | Database server          | `user` / `pass`               |
 | **Redis**       | 9813                                                    | Cache and message broker | No auth required              |
-| **MinIO**       | 9805 and [http://localhost:9806](http://localhost:9806) | Local S3 storage         | No auth required              |
+| **RustFS**      | 9805 and [http://localhost:9806](http://localhost:9806) | Local S3 storage         | `hub` / `password`            |
+
+### Local object storage
+
+Docker Compose and CI use RustFS with the `hub-media-storage` bucket and
+versioning enabled. Bucket initialization can be run again on an existing
+bucket. The backend starts only after initialization succeeds.
+
+RustFS stores its data in `data/rustfs`. Previous MinIO data in `data/media`
+is preserved and is not loaded by RustFS. To retain existing objects, copy
+them through the S3 API before using the new storage; do not reuse MinIO's
+on-disk data directory. A simple object copy does not preserve version history.
+
+When upgrading an existing local stack, stop its old MinIO container to free
+ports 9805 and 9806, then start the backend:
+
+```shellscript
+$ docker stop hub-minio-1 # only if the previous MinIO container exists
+$ make run-backend
+```
+
+Check `env.d/development/common.local` for any custom S3 endpoint override.
+The default internal endpoint is now `http://rustfs:9000`.
+
+For rollback, restore the previous storage configuration and restart MinIO
+with the preserved `data/media` directory. Objects written to RustFS after
+the switch would need a separate S3 copy back.
+
+The Kubernetes development stack still uses MinIO through the shared
+`helm-dev-backend` chart and requires a separate migration.
+
+### Matrix development services
 
 The **dev-only Matrix stack** is started separately with `make run-matrix` and adds:
 

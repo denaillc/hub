@@ -26,37 +26,45 @@ services:
     ports:
       - "9804:1080"
 
-  minio:
+  rustfs:
     user: ${DOCKER_USER:-1000}
-    image: quay.io/minio/minio
+    image: rustfs/rustfs:1.0.0
     environment:
-      - MINIO_ROOT_USER=hub
-      - MINIO_ROOT_PASSWORD=password
+      - RUSTFS_ACCESS_KEY=hub
+      - RUSTFS_SECRET_KEY=password
+      # Log to stdout without requiring a writable /logs directory.
+      - RUSTFS_OBS_LOG_DIRECTORY=
     ports:
       - '9805:9000'
       - '9806:9001'
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
       interval: 1s
       timeout: 20s
       retries: 300
-    entrypoint: ""
-    command: minio server --console-address :9001 /data
     volumes:
-      - ./data/media:/data
+      # Keep the previous MinIO data intact for migration or rollback.
+      - ./data/rustfs:/data
 
   createbuckets:
-    image: quay.io/minio/mc
+    image: amazon/aws-cli:2.37.4
+    environment:
+      - AWS_ACCESS_KEY_ID=hub
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://rustfs:9000
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
         restart: true
-    entrypoint: >
-      sh -c "
-      /usr/bin/mc alias set hub http://minio:9000 hub password && \
-      /usr/bin/mc mb hub/hub-media-storage && \
-      /usr/bin/mc version enable hub/hub-media-storage && \
-      exit 0;"
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        aws s3api head-bucket --bucket hub-media-storage 2>/dev/null || \
+          aws s3api create-bucket --bucket hub-media-storage
+        aws s3api put-bucket-versioning --bucket hub-media-storage \
+          --versioning-configuration Status=Enabled
 
   app-dev:
     build:
@@ -94,7 +102,7 @@ services:
         redis:
           condition: service_started
         createbuckets:
-          condition: service_started
+          condition: service_completed_successfully
 
   frontend-development:
     user: "${DOCKER_USER:-1000}"
