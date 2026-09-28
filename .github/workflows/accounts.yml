@@ -154,7 +154,7 @@ jobs:
 
       - name: Create writable /data
         run: |
-          sudo mkdir -p /data/media && \
+          sudo mkdir -p /data/rustfs && \
           sudo mkdir -p /data/static
 
       - name: Restore the mail templates
@@ -165,33 +165,38 @@ jobs:
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
           fail-on-cache-miss: true
 
-      - name: Start MinIO
+      - name: Start RustFS
         run: |
-          docker pull quay.io/minio/minio
-          docker run -d --name minio \
+          # /data/rustfs is root-owned on the CI runner.
+          docker run -d --name rustfs --user root \
             -p 9000:9000 \
-            -e "MINIO_ACCESS_KEY=hub" \
-            -e "MINIO_SECRET_KEY=password" \
-            -v /data/media:/data \
-            quay.io/minio/minio server --console-address :9001 /data
+            -e RUSTFS_ACCESS_KEY=hub \
+            -e RUSTFS_SECRET_KEY=password \
+            -e RUSTFS_OBS_LOG_DIRECTORY= \
+            -v /data/rustfs:/data \
+            rustfs/rustfs:1.0.0
 
-      # Tool to wait for a service to be ready
-      - name: Install Dockerize
+      - name: Wait for RustFS to be ready
         run: |
-          curl -sSL https://github.com/jwilder/dockerize/releases/download/v0.8.0/dockerize-linux-amd64-v0.8.0.tar.gz | sudo tar -C /usr/local/bin -xzv
+          curl --fail --silent --show-error \
+            --retry 60 --retry-delay 1 --retry-all-errors \
+            --max-time 5 --retry-max-time 120 \
+            http://localhost:9000/health/ready || \
+            { docker logs rustfs; exit 1; }
 
-      - name: Wait for MinIO to be ready
+      - name: Configure RustFS
         run: |
-          dockerize -wait tcp://localhost:9000 -timeout 10s
-
-      - name: Configure MinIO
-        run: |
-          MINIO=$(docker ps | grep quay.io/minio/minio | sed -E 's/.*\s+([a-zA-Z0-9_-]+)$/\1/')
-          docker exec ${MINIO} sh -c \
-            "mc alias set hub http://localhost:9000 hub password && \
-            mc alias ls && \
-            mc mb hub/hub-media-storage && \
-            mc version enable hub/hub-media-storage"
+          docker run --rm --network container:rustfs \
+            -e AWS_ACCESS_KEY_ID=hub \
+            -e AWS_SECRET_ACCESS_KEY=password \
+            -e AWS_DEFAULT_REGION=us-east-1 \
+            -e AWS_ENDPOINT_URL=http://localhost:9000 \
+            --entrypoint sh amazon/aws-cli:2.37.4 -ec '
+              aws s3api head-bucket --bucket hub-media-storage 2>/dev/null || \
+                aws s3api create-bucket --bucket hub-media-storage
+              aws s3api put-bucket-versioning --bucket hub-media-storage \
+                --versioning-configuration Status=Enabled
+            '
 
       - name: Install Python
         uses: actions/setup-python@v6
