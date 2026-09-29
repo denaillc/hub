@@ -231,7 +231,7 @@ def test_api_users_list_limit(settings):
     assert len(response.json()) == 15
 
 
-def test_api_users_list_throttling_authenticated(settings):
+def test_api_users_list_throttling_authenticated(settings, monkeypatch):
     """
     Authenticated users should be throttled.
     """
@@ -239,7 +239,11 @@ def test_api_users_list_throttling_authenticated(settings):
     client = APIClient()
     client.force_login(user)
 
-    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["user_list_burst"] = "3/minute"
+    # The settings fixture does not restore nested values: use monkeypatch so the
+    # lowered rate does not leak into the next tests run by the same worker.
+    monkeypatch.setitem(
+        settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "user_list_burst", "3/minute"
+    )
 
     for _i in range(3):
         response = client.get(
