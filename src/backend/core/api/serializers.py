@@ -72,3 +72,32 @@ class CallListQuerySerializer(serializers.Serializer):
         child=serializers.CharField(max_length=255), min_length=1, max_length=50
     )
     status = serializers.ChoiceField(choices=models.CallStatus.choices, required=False)
+
+
+class MeetWebhookRoomSerializer(serializers.Serializer):
+    """Validate the room a Visio webhook is about."""
+
+    id = serializers.UUIDField()
+
+
+class MeetWebhookCallSerializer(serializers.Serializer):
+    """Validate the call a Visio webhook is about."""
+
+    id = serializers.CharField(max_length=255)
+    started_at = serializers.DateTimeField(required=False, allow_null=True)
+    ended_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class MeetWebhookDataSerializer(serializers.Serializer):
+    """Validate the data of a Visio webhook."""
+
+    room = MeetWebhookRoomSerializer()
+    call = MeetWebhookCallSerializer()
+
+
+class MeetWebhookSerializer(serializers.Serializer):
+    """Validate a webhook sent by Visio."""
+
+    type = serializers.CharField()
+    timestamp = serializers.DateTimeField()
+    data = MeetWebhookDataSerializer()

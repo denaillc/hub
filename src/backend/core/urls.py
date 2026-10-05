@@ -23,6 +23,7 @@ urlpatterns = [
         ),
     ),
     path("config/", viewsets.ConfigView.as_view()),
+    path("webhooks/meet/", viewsets.MeetWebhookView.as_view()),
 ]
 
 # When DEBUG, include a 404 URL for E2E tests

@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 
 from core import models
 from core.api.filters import remove_accents
-from core.services.meet import MeetError
+from core.services.meet import MeetError, MeetWebhookSignatureError, verify_webhook
 
 from . import permissions, serializers
 from .filters import UserSearchFilter
@@ -322,6 +322,48 @@ class CallViewSet(
             self.get_serializer(call).data,
             status=drf.status.HTTP_201_CREATED if created else drf.status.HTTP_200_OK,
         )
+
+
+class MeetWebhookView(drf.views.APIView):
+    """Receive the events Visio sends about the calls held in its rooms."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    @extend_schema(request=serializers.MeetWebhookSerializer, responses={204: None})
+    def post(self, request):
+        """
+        POST /api/v1.0/webhooks/meet/
+            Record that a call started or ended in a Visio room.
+
+            Events of an unknown type or about an unknown room are acknowledged
+            and ignored, so Visio can add new ones without breaking the Hub.
+        """
+        try:
+            verify_webhook(request.headers, request.body)
+        except MeetWebhookSignatureError as err:
+            logger.warning("Rejected Visio webhook: %s", err)
+            return drf.response.Response(
+                {"detail": "Invalid signature."},
+                status=drf.status.HTTP_401_UNAUTHORIZED,
+            )
+
+        serializer = serializers.MeetWebhookSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = serializer.validated_data
+        room_id = event["data"]["room"]["id"]
+        call = event["data"]["call"]
+
+        if event["type"] == "call.started":
+            models.Call.objects.handle_started(
+                room_id, call["id"], call.get("started_at") or event["timestamp"]
+            )
+        elif event["type"] == "call.ended":
+            models.Call.objects.handle_ended(
+                room_id, call["id"], call.get("ended_at") or event["timestamp"]
+            )
+
+        return drf.response.Response(status=drf.status.HTTP_204_NO_CONTENT)
 
 
 class ConfigView(drf.views.APIView):

@@ -260,6 +260,63 @@ class CallManager(models.Manager):
                 return call, False
             return self.create(room=room, started_by=user), True
 
+    def handle_started(self, meet_room_id, meet_call_id, started_at):
+        """Record that Visio saw a first participant enter a room."""
+        try:
+            room = MeetRoom.objects.get(meet_room_id=meet_room_id)
+        except MeetRoom.DoesNotExist:
+            return None
+
+        with transaction.atomic():
+            MeetRoom.objects.select_for_update().get(pk=room.pk)
+            if call := self.filter(room=room, meet_call_id=meet_call_id).first():
+                return call
+
+            call = self.filter(
+                room=room, ended_at__isnull=True, confirmed_at__isnull=True
+            ).first()
+            if call is None:
+                # A confirmed call still open means its end was never received.
+                self.filter(room=room, ended_at__isnull=True).update(
+                    ended_at=started_at, updated_at=timezone.now()
+                )
+                # The call was started from Visio itself, e.g. with the room link.
+                return self.create(
+                    room=room,
+                    started_at=started_at,
+                    confirmed_at=started_at,
+                    meet_call_id=meet_call_id,
+                )
+
+            call.confirmed_at = started_at
+            call.meet_call_id = meet_call_id
+            call.save()
+            return call
+
+    def handle_ended(self, meet_room_id, meet_call_id, ended_at):
+        """Record that Visio saw the last participant leave a room."""
+        try:
+            room = MeetRoom.objects.get(meet_room_id=meet_room_id)
+        except MeetRoom.DoesNotExist:
+            return None
+
+        with transaction.atomic():
+            MeetRoom.objects.select_for_update().get(pk=room.pk)
+            call = self.filter(room=room, meet_call_id=meet_call_id).first()
+            if call is None:
+                # The start of this call was missed: it can only be the one that
+                # is still waiting for its confirmation.
+                call = self.filter(
+                    room=room, ended_at__isnull=True, confirmed_at__isnull=True
+                ).first()
+            if call is None or call.ended_at is not None:
+                return call
+
+            call.meet_call_id = meet_call_id
+            call.ended_at = max(ended_at, call.started_at)
+            call.save()
+            return call
+
 
 class Call(BaseModel):
     """A call held in the Visio room of a conversation."""

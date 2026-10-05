@@ -596,6 +596,13 @@ class Base(Configuration):
     MEET_ROOM_ACCESS_LEVEL = values.Value(
         "trusted", environ_name="MEET_ROOM_ACCESS_LEVEL", environ_prefix=None
     )
+    MEET_WEBHOOK_SECRET = SecretFileValue(
+        None, environ_name="MEET_WEBHOOK_SECRET", environ_prefix=None
+    )
+    # Accepted gap, in seconds, between the signature of a webhook and its reception
+    MEET_WEBHOOK_TOLERANCE = values.PositiveIntegerValue(
+        default=300, environ_name="MEET_WEBHOOK_TOLERANCE", environ_prefix=None
+    )
     # Time, in seconds, left to join a call before it is considered as abandoned
     MEET_CALL_JOIN_GRACE_PERIOD = values.PositiveIntegerValue(
         default=300, environ_name="MEET_CALL_JOIN_GRACE_PERIOD", environ_prefix=None
