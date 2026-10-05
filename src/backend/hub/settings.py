@@ -608,6 +608,16 @@ class Base(Configuration):
         default=300, environ_name="MEET_CALL_JOIN_GRACE_PERIOD", environ_prefix=None
     )
 
+    # Stand-in for Visio, for local development and demos only
+    FAKE_MEET_ENABLED = values.BooleanValue(
+        default=False, environ_name="FAKE_MEET_ENABLED", environ_prefix=None
+    )
+    FAKE_MEET_BASE_URL = values.Value(
+        "http://localhost:9801/fake-meet",
+        environ_name="FAKE_MEET_BASE_URL",
+        environ_prefix=None,
+    )
+
     # Content Security Policy
     # See https://content-security-policy.com/ for more information.
     CONTENT_SECURITY_POLICY = {
@@ -782,6 +792,9 @@ class Production(Base):
     configuration (and derived configurations):
     ALLOWED_HOSTS=["foo.com", "foo.fr"]
     """
+
+    # The stand-in for Visio accepts any credentials: never serve it for real.
+    FAKE_MEET_ENABLED = False
 
     # Security
     # Add allowed host from environment variables.
