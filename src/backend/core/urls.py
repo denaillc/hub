@@ -10,6 +10,7 @@ from core.api import viewsets
 # - Main endpoints
 router = DefaultRouter()
 router.register("users", viewsets.UserViewSet, basename="users")
+router.register("calls", viewsets.CallViewSet, basename="calls")
 
 
 urlpatterns = [

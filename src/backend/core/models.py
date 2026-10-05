@@ -3,16 +3,19 @@ Declare and configure the models for the hub core application
 """
 
 import uuid
+from datetime import timedelta
 from logging import getLogger
 
 from django.conf import settings
 from django.contrib.auth import models as auth_models
 from django.contrib.auth.base_user import AbstractBaseUser
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from timezone_field import TimeZoneField
 
+from core.services.meet import MeetClient
 from core.validators import sub_validator
 
 logger = getLogger(__name__)
@@ -166,3 +169,154 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
 
     def __str__(self):
         return self.email or self.admin_email or str(self.id)
+
+
+class MeetRoom(BaseModel):
+    """
+    The Visio room attached to a conversation.
+
+    A conversation gets a single room, created on its first call and reused for
+    every following one.
+    """
+
+    chat_service_id = models.CharField(
+        _("chat service id"),
+        help_text=_("Identifier of the conversation on its chat service."),
+        max_length=255,
+        unique=True,
+    )
+    meet_room_id = models.UUIDField(
+        _("Visio room id"),
+        help_text=_("Identifier of the room on Visio."),
+        unique=True,
+    )
+    url = models.URLField(_("url"), max_length=500)
+    created_by = models.ForeignKey(
+        User,
+        verbose_name=_("created by"),
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "hub_meet_room"
+        verbose_name = _("Visio room")
+        verbose_name_plural = _("Visio rooms")
+
+    def __str__(self):
+        return self.chat_service_id
+
+
+class CallStatus(models.TextChoices):
+    """Status of a call, as shown in its conversation."""
+
+    ONGOING = "ongoing", _("Ongoing")
+    ENDED = "ended", _("Ended")
+
+
+class CallManager(models.Manager):
+    """Custom manager for the Call model, handling the lifecycle of calls."""
+
+    def close_stale(self):
+        """
+        End the calls that nobody joined.
+
+        A call is opened as soon as a user asks for it, before anyone reaches
+        Visio. Without a confirmation from Visio within the grace period, it is
+        considered as never having taken place.
+        """
+        limit = timezone.now() - timedelta(seconds=settings.MEET_CALL_JOIN_GRACE_PERIOD)
+        return self.filter(
+            ended_at__isnull=True, confirmed_at__isnull=True, started_at__lt=limit
+        ).update(ended_at=models.F("started_at"), updated_at=timezone.now())
+
+    def start(self, chat_service_id, user):
+        """
+        Return the ongoing call of a conversation, opening one when there is none.
+
+        Returns a tuple of the call and whether it was opened by this request.
+        """
+        self.close_stale()
+
+        room = MeetRoom.objects.filter(chat_service_id=chat_service_id).first()
+        if room is None:
+            meet_room = MeetClient().create_room(user.email)
+            room, _created = MeetRoom.objects.get_or_create(
+                chat_service_id=chat_service_id,
+                defaults={
+                    "meet_room_id": meet_room["id"],
+                    "url": meet_room["url"],
+                    "created_by": user,
+                },
+            )
+
+        with transaction.atomic():
+            # Serialize concurrent starts so a conversation never gets two calls.
+            MeetRoom.objects.select_for_update().get(pk=room.pk)
+            call = self.filter(room=room, ended_at__isnull=True).first()
+            if call is not None:
+                return call, False
+            return self.create(room=room, started_by=user), True
+
+
+class Call(BaseModel):
+    """A call held in the Visio room of a conversation."""
+
+    room = models.ForeignKey(
+        MeetRoom,
+        verbose_name=_("room"),
+        on_delete=models.CASCADE,
+        related_name="calls",
+    )
+    started_by = models.ForeignKey(
+        User,
+        verbose_name=_("started by"),
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
+    started_at = models.DateTimeField(_("started at"), default=timezone.now)
+    confirmed_at = models.DateTimeField(
+        _("confirmed at"),
+        help_text=_("Date and time at which Visio reported the call as started."),
+        null=True,
+        blank=True,
+    )
+    ended_at = models.DateTimeField(_("ended at"), null=True, blank=True)
+    meet_call_id = models.CharField(
+        _("Visio call id"),
+        help_text=_("Identifier of the call on Visio."),
+        max_length=255,
+        null=True,
+        blank=True,
+    )
+
+    objects = CallManager()
+
+    class Meta:
+        db_table = "hub_call"
+        ordering = ("-started_at",)
+        verbose_name = _("call")
+        verbose_name_plural = _("calls")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["room"],
+                condition=models.Q(ended_at__isnull=True),
+                name="unique_ongoing_call_per_room",
+            ),
+            models.UniqueConstraint(
+                fields=["room", "meet_call_id"],
+                name="unique_meet_call_id_per_room",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.room} ({self.started_at:%Y-%m-%d %H:%M})"
+
+    @property
+    def status(self):
+        """Status of the call."""
+        return CallStatus.ENDED if self.ended_at else CallStatus.ONGOING
