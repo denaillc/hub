@@ -582,6 +582,25 @@ class Base(Configuration):
         environ_prefix=None,
     )
 
+    # Visio (Meet)
+    MEET_API_URL = values.Value(None, environ_name="MEET_API_URL", environ_prefix=None)
+    MEET_API_TIMEOUT = values.PositiveIntegerValue(
+        default=10, environ_name="MEET_API_TIMEOUT", environ_prefix=None
+    )
+    MEET_APPLICATION_CLIENT_ID = values.Value(
+        None, environ_name="MEET_APPLICATION_CLIENT_ID", environ_prefix=None
+    )
+    MEET_APPLICATION_CLIENT_SECRET = SecretFileValue(
+        None, environ_name="MEET_APPLICATION_CLIENT_SECRET", environ_prefix=None
+    )
+    MEET_ROOM_ACCESS_LEVEL = values.Value(
+        "trusted", environ_name="MEET_ROOM_ACCESS_LEVEL", environ_prefix=None
+    )
+    # Time, in seconds, left to join a call before it is considered as abandoned
+    MEET_CALL_JOIN_GRACE_PERIOD = values.PositiveIntegerValue(
+        default=300, environ_name="MEET_CALL_JOIN_GRACE_PERIOD", environ_prefix=None
+    )
+
     # Content Security Policy
     # See https://content-security-policy.com/ for more information.
     CONTENT_SECURITY_POLICY = {
