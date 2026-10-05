@@ -32,6 +32,9 @@ export const useStartCall = (ref: ChatRef | null): UseStartCallResult => {
       }
       const { call, created } = await getHubApi().startCall(ref.chatId);
       queryClient.setQueryData(chatKeys.call(call.id), call);
+      void queryClient.invalidateQueries({
+        queryKey: chatKeys.ongoingCallsAll(),
+      });
       if (tab) {
         tab.opener = null;
         tab.location.href = call.url;

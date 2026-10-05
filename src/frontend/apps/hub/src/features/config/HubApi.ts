@@ -15,7 +15,12 @@ export interface HubApi {
    */
   startCall(chatId: string): Promise<{ call: Call; created: boolean }>;
   getCall(id: string): Promise<Call>;
+  /** Ongoing calls among the given conversations. */
+  getOngoingCalls(chatIds: string[]): Promise<Call[]>;
 }
+
+/** Most conversations the calls endpoint accepts in one request. */
+const CALLS_CHAT_LIMIT = 50;
 
 export class StandardHubApi implements HubApi {
   async getConfig(): Promise<ApiConfig> {
@@ -49,6 +54,22 @@ export class StandardHubApi implements HubApi {
   async getCall(id: string): Promise<Call> {
     const response = await fetchAPI(`calls/${id}/`);
     return response.json();
+  }
+
+  async getOngoingCalls(chatIds: string[]): Promise<Call[]> {
+    const requests: Promise<Call[]>[] = [];
+    for (let start = 0; start < chatIds.length; start += CALLS_CHAT_LIMIT) {
+      const query = chatIds
+        .slice(start, start + CALLS_CHAT_LIMIT)
+        .map((chatId) => `chat_service_id=${encodeURIComponent(chatId)}`)
+        .join("&");
+      requests.push(
+        fetchAPI(`calls/?status=ongoing&${query}`).then((response) =>
+          response.json(),
+        ),
+      );
+    }
+    return (await Promise.all(requests)).flat();
   }
 }
 
