@@ -17,6 +17,7 @@ import {
   EventType,
   type MatrixClient,
   type MatrixEvent,
+  MsgType,
   NotificationCountType,
   RelationType,
   type Room,
@@ -29,6 +30,7 @@ import { hashAvatarColor } from "@/features/ui/components/avatar/palette";
 import { ChatEvent } from "../Driver";
 import {
   ChatAttachment,
+  ChatCall,
   ChatMessage,
   ChatMessageAuthor,
   ChatReaction,
@@ -576,6 +578,32 @@ const reactionEventToChatEvent = (
   );
 };
 
+/**
+ * Key carrying a call inside an `m.text` message. Clients unaware of it still
+ * show the plain-text body, which holds the link of the call.
+ */
+export const MATRIX_CALL_CONTENT_KEY = "fr.gouv.numerique.hub.call";
+
+export const matrixCallContent = (call: ChatCall, body: string) => ({
+  msgtype: MsgType.Text,
+  body,
+  [MATRIX_CALL_CONTENT_KEY]: { id: call.id, url: call.url },
+});
+
+const parseMatrixCall = (content: Record<string, unknown>): ChatCall | null => {
+  const call = content[MATRIX_CALL_CONTENT_KEY] as
+    | { id?: unknown; url?: unknown }
+    | undefined;
+  if (typeof call?.id !== "string" || typeof call.url !== "string") {
+    return null;
+  }
+  // The link is opened on click: never trust another scheme than http(s).
+  if (!/^https?:\/\//i.test(call.url)) {
+    return null;
+  }
+  return { id: call.id, url: call.url };
+};
+
 export const matrixEventToChatMessage = (
   event: MatrixEvent,
   room: Room,
@@ -585,9 +613,11 @@ export const matrixEventToChatMessage = (
   const content = event.getContent<{ body?: string; msgtype?: string }>();
   const body = content.body;
   const media = isDeleted ? null : parseMatrixAttachment(content);
+  const call = isDeleted || media ? null : parseMatrixCall(content);
   const eventId = event.getId() ?? "";
   const canEdit = Boolean(
     !isDeleted &&
+    !call &&
     selfUserId &&
     event.getSender() === selfUserId &&
     content.msgtype === "m.text",
@@ -606,6 +636,7 @@ export const matrixEventToChatMessage = (
         ? body
         : "",
     ...(media ? { attachment: media.attachment } : {}),
+    ...(call ? { call } : {}),
     timestamp: new Date(event.getTs()).toISOString(),
     reactions: isDeleted
       ? []
@@ -714,17 +745,19 @@ export const sendResponseToChatMessage = (
   eventId: string,
   content: string,
   attachment?: ChatAttachment,
+  call?: ChatCall,
 ): ChatMessage => ({
   id: eventId,
   authorId: SELF_AUTHOR_ID,
   content,
   ...(attachment ? { attachment } : {}),
+  ...(call ? { call } : {}),
   timestamp: new Date().toISOString(),
   reactions: [],
   isDeleted: false,
   isEdited: false,
   // Only text bodies can be replaced in place.
-  canEdit: !attachment,
+  canEdit: !attachment && !call,
   canDelete: true,
 });
 
