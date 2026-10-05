@@ -8,6 +8,7 @@ and this project adheres to
 
 ### Added
 
+- ✨(project) Start a Visio call from a conversation and show its status #38
 - ✨(frontend) Attach, preview and download files in conversations.
   Upload files picked, pasted or dropped on the conversation before sending.
   Send files in threads and in a new conversation not created yet.

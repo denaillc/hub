@@ -8,6 +8,7 @@ import { useCallback } from "react";
 import { getRegistry } from "@/features/drivers/DriverRegistry";
 import type {
   ChatAttachment,
+  ChatCall,
   ChatMessage,
   ChatRef,
 } from "@/features/drivers/types";
@@ -27,6 +28,8 @@ type SendMessageVariables = {
   content: string;
   /** Posts this uploaded file instead of a text message. */
   attachment?: ChatAttachment;
+  /** Announces this call; `content` is then its plain-text fallback. */
+  call?: ChatCall;
 };
 
 type SendMessageContext = {
@@ -44,6 +47,7 @@ export type UseSendChatMessageResult = {
     attachment?: ChatAttachment,
   ) => Promise<ChatMessage>;
   sendAttachment: (attachment: ChatAttachment) => Promise<ChatMessage>;
+  sendCall: (call: ChatCall, fallback: string) => Promise<ChatMessage>;
   isSending: boolean;
   isSupported: boolean;
 };
@@ -60,7 +64,7 @@ export const useSendChatMessage = (
     SendMessageVariables,
     SendMessageContext
   >({
-    mutationFn: ({ ref: targetRef, content, attachment }) => {
+    mutationFn: ({ ref: targetRef, content, attachment, call }) => {
       const driver = getRegistry().get(targetRef.accountId);
       if (!driver.supportsComposition) {
         throw new Error("Conversation message composition is not available.");
@@ -69,9 +73,10 @@ export const useSendChatMessage = (
         chatId: targetRef.chatId,
         content,
         attachment,
+        call,
       });
     },
-    onMutate: async ({ ref: targetRef, content, attachment }) => {
+    onMutate: async ({ ref: targetRef, content, attachment, call }) => {
       const messagesKey: QueryKey = chatKeys.messages(targetRef);
       await queryClient.cancelQueries({ queryKey: messagesKey });
       const previousMessages =
@@ -80,6 +85,7 @@ export const useSendChatMessage = (
         content,
         "optimistic-message",
         attachment,
+        call,
       );
 
       queryClient.setQueryData<ChatMessagesData>(messagesKey, (old) =>
@@ -143,10 +149,21 @@ export const useSendChatMessage = (
     [mutateAsync, ref],
   );
 
+  const sendCall = useCallback(
+    (call: ChatCall, fallback: string) => {
+      if (!ref) {
+        return Promise.reject(new Error("Announcing a call requires a chat."));
+      }
+      return mutateAsync({ ref, content: fallback, call });
+    },
+    [mutateAsync, ref],
+  );
+
   return {
     sendMessage,
     sendMessageTo,
     sendAttachment,
+    sendCall,
     isSending: isPending,
     isSupported,
   };
