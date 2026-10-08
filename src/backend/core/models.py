@@ -9,7 +9,7 @@ from logging import getLogger
 from django.conf import settings
 from django.contrib.auth import models as auth_models
 from django.contrib.auth.base_user import AbstractBaseUser
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -171,6 +171,36 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
         return self.email or self.admin_email or str(self.id)
 
 
+class MeetRoomManager(models.Manager):
+    """Custom manager for the MeetRoom model."""
+
+    def get_or_create_for_chat(self, chat_service_id, user):
+        """Return the Visio room of a conversation, creating it on its first call."""
+        room = self.filter(chat_service_id=chat_service_id).first()
+        if room is not None:
+            return room
+
+        with transaction.atomic():
+            # No row can be locked yet: lock the conversation itself, so that
+            # concurrent first calls do not each create a room on Visio.
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    [chat_service_id],
+                )
+            room = self.filter(chat_service_id=chat_service_id).first()
+            if room is not None:
+                return room
+
+            meet_room = MeetClient().create_room(user.email)
+            return self.create(
+                chat_service_id=chat_service_id,
+                meet_room_id=meet_room["id"],
+                url=meet_room["url"],
+                created_by=user,
+            )
+
+
 class MeetRoom(BaseModel):
     """
     The Visio room attached to a conversation.
@@ -199,6 +229,8 @@ class MeetRoom(BaseModel):
         null=True,
         blank=True,
     )
+
+    objects = MeetRoomManager()
 
     class Meta:
         db_table = "hub_meet_room"
@@ -240,17 +272,7 @@ class CallManager(models.Manager):
         """
         self.close_stale()
 
-        room = MeetRoom.objects.filter(chat_service_id=chat_service_id).first()
-        if room is None:
-            meet_room = MeetClient().create_room(user.email)
-            room, _created = MeetRoom.objects.get_or_create(
-                chat_service_id=chat_service_id,
-                defaults={
-                    "meet_room_id": meet_room["id"],
-                    "url": meet_room["url"],
-                    "created_by": user,
-                },
-            )
+        room = MeetRoom.objects.get_or_create_for_chat(chat_service_id, user)
 
         with transaction.atomic():
             # Serialize concurrent starts so a conversation never gets two calls.
